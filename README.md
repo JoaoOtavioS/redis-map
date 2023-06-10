@@ -7,51 +7,40 @@ npm install @joaootavios/redis-map
 ```
 
 ## Example of usage
-### Machine 01;
 ```javascript
-const RedisMap = require("@joaootavios/redis-map");
+const { RedisAPI, RedisMap } = require("@joaootavios/redis-map");
 
-const mapInstance = new RedisMap({ name: "my_map", url: REDIS_URL, monitor: (type, message) => {
-    console.log(`Monitor: ${type} - ${message}`);
-  }
+const connections = await new RedisAPI({
+    url: process.env.REDIS, monitor: (type, message) => {
+        console.log(`[REDIS] ${type}: ${message}`);
+    }
+}).connect();
+
+// Example using same connection (for two maps);
+
+// first map;
+const cacheUsers = new RedisMap({
+    connections,
+    name: "example:cache:users", monitor: (type, message, name) => {
+        console.log(name, type, message);
+    }
 });
 
-// connect to redis to start using the map
-await mapInstance.connect();
-await mapInstance.set("joaootavios", { plan: "rich", age: 999, power: "god" });
-await mapInstance.set("batman", { plan: "?", age: "?" }, 10); // expire in 10 seconds;
+// second map;
+const cacheApps = new RedisMap({
+    connections,
+    name: "example:cache:apps", monitor: (type, message, name) => {
+        console.log(name, type, message);
+    }
+});
 
-console.log(mapInstance.get("joaootavios"));
-```
+await cacheUsers.set("joao", { plan: "free", balance: 1000 });
+console.log(cacheUsers.get("joao"), "\n");
 
-### Machine 02;
-```javascript
-const RedisMap = require("@joaootavios/redis-map");
-const mapInstance = new RedisMap({ name: "my_map", url: REDIS_URL });
+await cacheApps.set("water_man", { protection: 10, shield: 50 });
+console.log(cacheApps.get("water_man"), "\n");
 
-// connect to redis to start using the map
-await mapInstance.connect();
-console.log(mapInstance.get("joaootavios"));
-```
-
-## Options
-To initialize the RedisMap class, you can use the following options:
-
-```javascript
-const RedisMap = require("@joaootavios/redis-map");
-
-const options = {
-  name: "my_map",
-  url: "redis://localhost:6379",
-  autoConnect: true, // default: false
-  syncOnConnect: false, // default: true
-  redisOptions: {},
-  monitor: (type, message) => {
-    console.log(`Monitor: ${type} - ${message}`);
-  },
-};
-
-const myMap = new RedisMap(options);
+connections.disconnect();
 ```
 
 ## LICENSE
