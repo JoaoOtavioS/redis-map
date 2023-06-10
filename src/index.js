@@ -1,6 +1,65 @@
 // Created with ❤️ by @joaootavios
 const redis = require("redis");
 
+class RedisAPI {
+
+    #redis;
+    #pubsub;
+    #monitor;
+
+    /**
+     * Initialize the RedisMap class.
+     * @param {Object} options Options.
+     * @param {String} options.url Redis url.
+     * @param {Function} options.monitor Callback function. Args: (type = "state / error", message = string).
+     * @param {Object} options.redisOptions Redis options. (Default: {}).
+     */
+    constructor(options) {
+
+        const url = options?.url;
+
+        if (!url || url.match(/redis:\/\//g) === null) {
+            throw new Error("[@joaootavios/redis-map] Invalid redis url!");
+        };
+
+        this.#redis = redis.createClient({ url, ...options?.redisOptions });
+        this.#pubsub = this.#redis.duplicate();
+        this.#monitor = options?.monitor;
+
+        this.#redis.on("connect", () => this.#log("state", "[@joaootavios/redis-map] Redis client connected!"));
+        this.#pubsub.on("connect", () => this.#log("state", "[@joaootavios/redis-map] Redis pubsub connected!"));
+
+        this.#redis.on("error", (err) => this.#log("error", `[@joaootavios/redis-map] Redis error: ${err}`));
+        this.#pubsub.on("error", (err) => this.#log("error", `[@joaootavios/redis-map] Redis pubsub error: ${err}`));
+
+    }
+
+    async connect() {
+
+        if (this.#pubsub.isOpen && this.#redis.isOpen) return;
+        await Promise.all([this.#redis.connect(), this.#pubsub.connect()]);
+
+        // Enable expired events for keyspace notifications in all maps.
+        this.#pubsub.configSet("notify-keyspace-events", "Ex");
+
+        return {
+            redis: this.#redis,
+            pubsub: this.#pubsub,
+            disconnect: this.disconnect.bind(this)
+        }
+    }
+
+    async disconnect() {
+        if (!this.#pubsub.isOpen && !this.#redis.isOpen) return;
+        await Promise.all([this.#redis.quit(), this.#pubsub.quit()]);
+    }
+
+    #log(type, message) {
+        if (this.#monitor) this.#monitor(type, message);
+    }
+
+}
+
 class RedisMap {
     #redis;
     #pubsub;
@@ -10,42 +69,23 @@ class RedisMap {
      * Initialize the RedisMap class.
      * @param {Object} options Options.
      * @param {String} options.name Name of the map. (Default: redis-map).
-     * @param {String} options.url Redis url. (Default: redis://localhost:6379).
-     * @param {Boolean} options.autoConnect Connect to redis on initialize. (Default: false).
-     * @param {Boolean} options.syncOnConnect Sync data on connect. (Default: true).
-     * @param {Object} options.redisOptions Redis options. (Default: {}).
-     * @param {Function} options.monitor Callback function. Args: (type = "state / info / error", message = string).
+     * @param {Boolean} options.sync Sync data from redis on init. (Default: true).
+     * @param {Function} options.monitor Callback function. Args: (type = "state / info / error", message = string, name = name of the map).
      */
-    constructor(options = { url: "redis://localhost:6379" }) {
+    constructor(options) {
         this.name = options?.name || "redis-map";
         this.#options = options;
         this.data = {};
 
-        this.#redis = redis.createClient({ url: options?.url, ...(options?.redisOptions || {}) });
-        this.#pubsub = redis.createClient({ url: options?.url, ...(options?.redisOptions || {}) });
+        this.#redis = options?.connections.redis;
+        this.#pubsub = options?.connections.pubsub;
 
-        this.#redis.on("connect", () => this.#log("state", `[${this.name}] Redis client connected!`));
-        this.#pubsub.on("connect", () => this.#log("state", `[${this.name}] Redis pubsub connected!`));
+        if (!(this.#redis.isOpen || this.#pubsub.isOpen)) {
+            throw new Error("[@joaootavios/redis-map] Redis client is not connected!");
+        };
 
-        this.#redis.on("error", (err) => this.#log("error", `[${this.name}] Redis error: ${err}`));
-        this.#pubsub.on("error", (err) => this.#log("error", `[${this.name}] Redis pubsub error: ${err}`));
-
-        if (options.autoConnect === true) this.connect();
-    }
-
-    async connect() {
-        if (!this.#redis.isOpen && !this.#pubsub.isOpen) {
-            await Promise.all([this.#redis.connect(), this.#pubsub.connect()]);
-            if (this.#options?.syncOnConnect !== false) {
-                await this.#sync();
-                this.#log("info", `[${this.name}] Redis data synced!`);
-            }
-            this.#subscribe();
-        }
-    }
-
-    async disconnect() {
-        await Promise.all([this.#redis.quit(), this.#pubsub.quit()]);
+        if (this.#options?.sync !== false) this.sync();
+        this.#subscribe();
     }
 
     get(key) {
@@ -90,8 +130,17 @@ class RedisMap {
         await this.#publish({ action: "clear" });
     }
 
+    async sync() {
+        const data = await this.#redis.get(this.name).catch(() => null);
+
+        if (data) {
+            this.data = JSON.parse(data);
+            this.#log("info", `[${this.name}] Redis data synced!`);
+        }
+    }
+
     #log(type, message) {
-        if (this.#options?.monitor) this.#options.monitor(type, message);
+        if (this.#options?.monitor) this.#options.monitor(type, message, this.name);
     }
 
     async #publish(...data) {
@@ -99,17 +148,7 @@ class RedisMap {
         await this.#redis.publish(this.name, message);
     }
 
-    async #sync() {
-        const data = await this.#redis.get(this.name);
-
-        if (data) {
-            this.data = JSON.parse(data);
-        }
-    }
-
     #subscribe() {
-
-        this.#pubsub.configSet("notify-keyspace-events", "Ex");
 
         this.#pubsub.pSubscribe("__keyevent@0__:expired", (data) => {
             if (data.startsWith(`rmap-${this.name}-ex`)) {
@@ -118,7 +157,7 @@ class RedisMap {
         });
 
         this.#pubsub.subscribe(this.name, (message) => {
-            if (this.#options?.monitor) this.#options.monitor("info", message);
+            this.#log("info", message);
             const { action, key, value } = JSON.parse(message);
 
             switch (action) {
@@ -139,4 +178,7 @@ class RedisMap {
 
 }
 
-module.exports = RedisMap;
+module.exports = {
+    RedisAPI,
+    RedisMap
+};
