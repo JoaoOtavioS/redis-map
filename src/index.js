@@ -73,6 +73,7 @@ class RedisMap {
      * @param {Function} options.monitor Callback function. Args: (type = "state / info / error", message = string, name = name of the map).
      */
     constructor(options) {
+
         this.name = options?.name || "redis-map";
         this.#options = options;
         this.data = {};
@@ -108,8 +109,10 @@ class RedisMap {
      */
     async set(key, value, expire) {
         this.data[key] = value;
-        await this.#redis.set(this.name, JSON.stringify(this.data));
-        await this.#publish({ action: "set", key, value });
+        await Promise.all([
+            this.#redis.set(this.name, JSON.stringify(this.data)),
+            this.#publish({ action: "set", key, value })
+        ]);
         if (expire) this.#redis.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
     }
 
@@ -119,8 +122,10 @@ class RedisMap {
      */
     async delete(key) {
         delete this.data[key];
-        await this.#redis.set(this.name, JSON.stringify(this.data));
-        await this.#publish({ action: "delete", key });
+        await Promise.all([
+            this.#redis.set(this.name, JSON.stringify(this.data)),
+            this.#publish({ action: "delete", key })
+        ])
     }
 
     /**
