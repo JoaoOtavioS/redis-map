@@ -16,5 +16,13 @@
     "synchronized"
   ],
   "author": "JoaoOtavioS",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joaootavios/redis-map.git"
+  },
+  "bugs": {
+    "url": "https://github.com/joaootavios/redis-map/issues"
+  },
+  "homepage": "https://github.com/joaootavios/redis-map#readme"
 }
