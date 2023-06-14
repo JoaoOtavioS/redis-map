@@ -1,4 +1,4 @@
-## Informações
+## Information
 A simple way to use something similar to the Map in javascript, but synchronized with the power of Redis.
 
 ## Install
