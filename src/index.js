@@ -51,7 +51,10 @@ class RedisAPI {
 
     async disconnect() {
         if (!this.#pubsub.isOpen && !this.#redis.isOpen) return;
-        await Promise.all([this.#redis.quit(), this.#pubsub.quit()]);
+        await Promise.all([
+            this.#redis.quit(),
+            this.#pubsub.quit()
+        ]);
     }
 
     #log(type, message) {
@@ -111,7 +114,7 @@ class RedisMap {
         this.data[key] = value;
         await Promise.all([
             this.#redis.set(this.name, JSON.stringify(this.data)),
-            this.#publish({ action: "set", key, value })
+            this.#publish({ a: 1, key, value })
         ]);
         if (expire) this.#redis.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
     }
@@ -124,7 +127,7 @@ class RedisMap {
         delete this.data[key];
         await Promise.all([
             this.#redis.set(this.name, JSON.stringify(this.data)),
-            this.#publish({ action: "delete", key })
+            this.#publish({ a: 2, key })
         ])
     }
 
@@ -132,7 +135,10 @@ class RedisMap {
      * WARNING: This method will clear all data from the map in local cache and redis.
      */
     async clear() {
-        await this.#publish({ action: "clear" });
+        await Promise.all([
+            this.#redis.del(this.name),
+            this.#publish({ a: 3 })
+        ])
     }
 
     async sync() {
@@ -162,18 +168,17 @@ class RedisMap {
         });
 
         this.#pubsub.subscribe(this.name, (message) => {
-            this.#log("info", message);
-            const { action, key, value } = JSON.parse(message);
+            const { a: action, key, value } = JSON.parse(message);
+            this.#log("info", { action, key, value });
 
             switch (action) {
-                case "set":
+                case 1:
                     this.data[key] = value;
                     break;
-                case "delete":
+                case 2:
                     delete this.data[key];
                     break;
-                case "clear":
-                    this.#redis.del(this.name);
+                case 3:
                     this.data = {};
                     break;
             }
