@@ -112,11 +112,17 @@ class RedisMap {
      */
     async set(key, value, expire) {
         this.data[key] = value;
-        await Promise.all([
-            this.#redis.set(this.name, JSON.stringify(this.data)),
-            this.#publish({ a: 1, key, value })
-        ]);
-        if (expire) this.#redis.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
+
+        const pipeline = this.#redis.multi();
+
+        pipeline.set(this.name, JSON.stringify(this.data));
+        pipeline.publish(this.name, JSON.stringify({ a: 1, key, value }));
+
+        if (expire) {
+            pipeline.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
+        }
+
+        await pipeline.exec();
     }
 
     /**
@@ -125,20 +131,25 @@ class RedisMap {
      */
     async delete(key) {
         delete this.data[key];
-        await Promise.all([
-            this.#redis.set(this.name, JSON.stringify(this.data)),
-            this.#publish({ a: 2, key })
-        ])
+
+        const pipeline = this.#redis.multi();
+
+        pipeline.set(this.name, JSON.stringify(this.data));
+        pipeline.publish(this.name, JSON.stringify({ a: 2, key }));
+
+        await pipeline.exec();
     }
 
     /**
      * WARNING: This method will clear all data from the map in local cache and redis.
      */
     async clear() {
-        await Promise.all([
-            this.#redis.del(this.name),
-            this.#publish({ a: 3 })
-        ])
+        const pipeline = this.#redis.multi();
+
+        pipeline.del(this.name);
+        pipeline.publish(this.name, JSON.stringify({ a: 3 }));
+
+        await pipeline.exec();
     }
 
     async sync() {
@@ -152,11 +163,6 @@ class RedisMap {
 
     #log(type, message) {
         if (this.#options?.monitor) this.#options.monitor(type, message, this.name);
-    }
-
-    async #publish(...data) {
-        const message = JSON.stringify(...data);
-        await this.#redis.publish(this.name, message);
     }
 
     #subscribe() {
