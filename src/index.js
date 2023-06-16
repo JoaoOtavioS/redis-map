@@ -16,47 +16,72 @@ class RedisAPI {
      */
     constructor(options) {
 
-        const url = options?.url;
+        const url = options && options.url;
 
-        if (!url || url.match(/redis:\/\//g) === null) {
+        if (!url || !url.match(/redis:\/\//g)) {
             throw new Error("[@joaootavios/redis-map] Invalid redis url!");
-        };
+        }
 
-        this.#redis = redis.createClient({ url, ...options?.redisOptions });
+        this.#redis = redis.createClient({ url, ...(options && options.redisOptions) });
         this.#pubsub = this.#redis.duplicate();
-        this.#monitor = options?.monitor;
+        this.#monitor = options && options.monitor;
 
-        this.#redis.on("connect", () => this.#log("state", "[@joaootavios/redis-map] Redis client connected!"));
-        this.#pubsub.on("connect", () => this.#log("state", "[@joaootavios/redis-map] Redis pubsub connected!"));
+        this.#redis.on("connect", () => {
+            this.#log("state", "[@joaootavios/redis-map] Redis client connected!");
+        });
 
-        this.#redis.on("error", (err) => this.#log("error", `[@joaootavios/redis-map] Redis error: ${err}`));
-        this.#pubsub.on("error", (err) => this.#log("error", `[@joaootavios/redis-map] Redis pubsub error: ${err}`));
+        this.#pubsub.on("connect", () => {
+            this.#log("state", "[@joaootavios/redis-map] Redis pubsub connected!");
+        });
+
+        this.#redis.on("error", (err) => {
+            this.#log("error", `[@joaootavios/redis-map] Redis error: ${err}`);
+        });
+
+        this.#pubsub.on("error", (err) => {
+            this.#log("error", `[@joaootavios/redis-map] Redis pubsub error: ${err}`);
+        });
 
     }
 
+    /**
+     * Connect to Redis.
+     * @returns {Object} Redis connection information.
+     */
     async connect() {
-
         if (this.#pubsub.isOpen && this.#redis.isOpen) return;
-        await Promise.all([this.#redis.connect(), this.#pubsub.connect()]);
 
-        // Enable expired events for keyspace notifications in all maps.
+        await Promise.all([
+            this.#redis.connect(),
+            this.#pubsub.connect()
+        ]);
+
         this.#pubsub.configSet("notify-keyspace-events", "Ex");
 
         return {
             redis: this.#redis,
             pubsub: this.#pubsub,
             disconnect: this.disconnect.bind(this)
-        }
+        };
     }
 
+    /**
+     * Disconnect from Redis.
+     */
     async disconnect() {
         if (!this.#pubsub.isOpen && !this.#redis.isOpen) return;
+
         await Promise.all([
             this.#redis.quit(),
             this.#pubsub.quit()
         ]);
     }
 
+    /**
+     * Log a message.
+     * @param {String} type Log type.
+     * @param {String} message Log message.
+     */
     #log(type, message) {
         if (this.#monitor) this.#monitor(type, message);
     }
@@ -76,38 +101,51 @@ class RedisMap {
      * @param {Function} options.monitor Callback function. Args: (type = "state / info / error", message = string, name = name of the map).
      */
     constructor(options) {
-
-        this.name = options?.name || "redis-map";
+        this.name = (options && options.name) || "redis-map";
         this.#options = options;
         this.data = {};
 
-        this.#redis = options?.connections.redis;
-        this.#pubsub = options?.connections.pubsub;
+        this.#redis = options && options.connections.redis;
+        this.#pubsub = options && options.connections.pubsub;
 
         if (!(this.#redis.isOpen || this.#pubsub.isOpen)) {
             throw new Error("[@joaootavios/redis-map] Redis client is not connected!");
         };
 
-        if (this.#options?.sync !== false) this.sync();
+        if (this.#options && this.#options.sync !== false) this.sync();
         this.#subscribe();
     }
 
+    /**
+     * Get a value from the map.
+     * @param {String} key Key.
+     * @returns {*} Value associated with the key, or null if not found.
+     */
     get(key) {
         return this.data[key] || null;
     }
 
+    /**
+     * Check if a key exists in the map.
+     * @param {String} key Key.
+     * @returns {Boolean} True if the key exists, false otherwise.
+     */
     has(key) {
         return key in this.data;
     }
 
+    /**
+     * Get the entries of the map.
+     * @returns {Array} Array of [key, value] pairs.
+     */
     entries() {
         return Object.entries(this.data);
     }
 
     /**
      * Set a value to the map in local cache and redis.
-     * @param {String} key
-     * @param {*} value
+     * @param {String} key Key.
+     * @param {*} value Value.
      * @param {Number} expire Expire key in seconds.
      */
     async set(key, value, expire) {
@@ -116,7 +154,7 @@ class RedisMap {
         const pipeline = this.#redis.multi();
 
         pipeline.set(this.name, JSON.stringify(this.data));
-        pipeline.publish(this.name, JSON.stringify({ a: 1, key, value }));
+        pipeline.publish(this.name, JSON.stringify({ a: 1, key: key, value: value }));
 
         if (expire) {
             pipeline.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
@@ -127,7 +165,7 @@ class RedisMap {
 
     /**
      * Delete a value from the map in local cache and redis.
-     * @param {String} key
+     * @param {String} key Key.
      */
     async delete(key) {
         delete this.data[key];
@@ -135,7 +173,7 @@ class RedisMap {
         const pipeline = this.#redis.multi();
 
         pipeline.set(this.name, JSON.stringify(this.data));
-        pipeline.publish(this.name, JSON.stringify({ a: 2, key }));
+        pipeline.publish(this.name, JSON.stringify({ a: 2, key: key }));
 
         await pipeline.exec();
     }
@@ -152,6 +190,9 @@ class RedisMap {
         await pipeline.exec();
     }
 
+    /**
+     * Sync the map data from Redis.
+     */
     async sync() {
         const data = await this.#redis.get(this.name).catch(() => null);
 
@@ -161,10 +202,20 @@ class RedisMap {
         }
     }
 
+    /**
+     * Log a message.
+     * @param {String} type Log type.
+     * @param {String} message Log message.
+     */
     #log(type, message) {
-        if (this.#options?.monitor) this.#options.monitor(type, message, this.name);
+        if (this.#options && this.#options.monitor) {
+            this.#options.monitor(type, message, this.name);
+        }
     }
 
+    /**
+     * Subscribe to pubsub events.
+     */
     #subscribe() {
 
         this.#pubsub.pSubscribe("__keyevent@0__:expired", (data) => {
