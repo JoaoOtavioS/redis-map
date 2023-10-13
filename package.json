@@ -1,6 +1,6 @@
 {
   "name": "@joaootavios/redis-map",
-  "version": "2.0.4",
+  "version": "3.0.0",
   "description": "A simple way to use something similar to the Map in javascript, but synchronized with the power of Redis.",
   "main": "src/index.js",
   "dependencies": {
