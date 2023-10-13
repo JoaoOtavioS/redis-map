@@ -1,5 +1,12 @@
 // Created with ❤️ by @joaootavios
 const redis = require("redis");
+const msgpack = require("msgpack-lite");
+
+const Action = {
+    SET: 1,
+    DELETE: 2,
+    CLEAR: 3
+};
 
 class RedisAPI {
 
@@ -18,7 +25,7 @@ class RedisAPI {
 
         const url = options?.url;
 
-        if (!url || url.match(/redis:\/\//g) === null) {
+        if (!url || !url.match(/redis:\/\//g)) {
             throw new Error("[@joaootavios/redis-map] Invalid redis url!");
         };
 
@@ -34,6 +41,10 @@ class RedisAPI {
 
     }
 
+    /**
+     * Connect to Redis.
+     * @returns {Object} Redis connection information.
+     */
     async connect() {
 
         if (this.#pubsub.isOpen && this.#redis.isOpen) return;
@@ -49,6 +60,9 @@ class RedisAPI {
         }
     }
 
+    /**
+     * Disconnect from Redis.
+     */
     async disconnect() {
         if (!this.#pubsub.isOpen && !this.#redis.isOpen) return;
         await Promise.all([
@@ -57,6 +71,11 @@ class RedisAPI {
         ]);
     }
 
+    /**
+     * Log a message.
+     * @param {String} type Log type.
+     * @param {String} message Log message.
+     */
     #log(type, message) {
         if (this.#monitor) this.#monitor(type, message);
     }
@@ -81,8 +100,8 @@ class RedisMap {
         this.#options = options;
         this.data = {};
 
-        this.#redis = options?.connections.redis;
-        this.#pubsub = options?.connections.pubsub;
+        this.#redis = options?.connections?.redis;
+        this.#pubsub = options?.connections?.pubsub;
 
         if (!(this.#redis.isOpen || this.#pubsub.isOpen)) {
             throw new Error("[@joaootavios/redis-map] Redis client is not connected!");
@@ -106,8 +125,8 @@ class RedisMap {
 
     /**
      * Set a value to the map in local cache and redis.
-     * @param {String} key
-     * @param {*} value
+     * @param {String} key Key
+     * @param {*} value Value
      * @param {Number} expire Expire key in seconds.
      */
     async set(key, value, expire) {
@@ -115,8 +134,9 @@ class RedisMap {
 
         const pipeline = this.#redis.multi();
 
-        pipeline.set(this.name, JSON.stringify(this.data));
-        pipeline.publish(this.name, JSON.stringify({ a: 1, key, value }));
+        const compressedValue = msgpack.encode(JSON.stringify(value));
+        pipeline.set(this.name, compressedValue);
+        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.SET, key, value: compressedValue })));
 
         if (expire) {
             pipeline.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
@@ -134,8 +154,8 @@ class RedisMap {
 
         const pipeline = this.#redis.multi();
 
-        pipeline.set(this.name, JSON.stringify(this.data));
-        pipeline.publish(this.name, JSON.stringify({ a: 2, key }));
+        pipeline.set(this.name, msgpack.encode(JSON.stringify(this.data)));
+        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.DELETE, key })));
 
         await pipeline.exec();
     }
@@ -147,7 +167,7 @@ class RedisMap {
         const pipeline = this.#redis.multi();
 
         pipeline.del(this.name);
-        pipeline.publish(this.name, JSON.stringify({ a: 3 }));
+        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.CLEAR })));
 
         await pipeline.exec();
     }
@@ -156,7 +176,7 @@ class RedisMap {
         const data = await this.#redis.get(this.name).catch(() => null);
 
         if (data) {
-            this.data = JSON.parse(data);
+            this.data = JSON.parse(msgpack.decode(data));
             this.#log("info", `[${this.name}] Redis data synced!`);
         }
     }
@@ -174,17 +194,17 @@ class RedisMap {
         });
 
         this.#pubsub.subscribe(this.name, (message) => {
-            const { a: action, key, value } = JSON.parse(message);
+            const { a: action, key, value } = JSON.parse(msgpack.decode(message));
             this.#log("info", { action, key, value });
 
             switch (action) {
-                case 1:
+                case Action.SET:
                     this.data[key] = value;
                     break;
-                case 2:
+                case Action.DELETE:
                     delete this.data[key];
                     break;
-                case 3:
+                case Action.CLEAR:
                     this.data = {};
                     break;
             }

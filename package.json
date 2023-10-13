@@ -1,10 +1,11 @@
 {
   "name": "@joaootavios/redis-map",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "A simple way to use something similar to the Map in javascript, but synchronized with the power of Redis.",
   "main": "src/index.js",
   "dependencies": {
-    "redis": "^4.6.7"
+    "msgpack-lite": "^0.1.26",
+    "redis": "^4.6.10"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
