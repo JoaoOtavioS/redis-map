@@ -1,6 +1,6 @@
 // Created with ❤️ by @joaootavios
 const redis = require("redis");
-const msgpack = require("msgpack-lite");
+const simdjson = require("simdjson");
 
 const Action = {
     SET: 1,
@@ -134,9 +134,8 @@ class RedisMap {
 
         const pipeline = this.#redis.multi();
 
-        const compressedValue = msgpack.encode(JSON.stringify(value));
-        pipeline.set(this.name, compressedValue);
-        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.SET, key, value: compressedValue })));
+        pipeline.set(this.name, JSON.stringify(value));
+        pipeline.publish(this.name, JSON.stringify({ a: Action.SET, key, value }));
 
         if (expire) {
             pipeline.set(`rmap-${this.name}-ex=${key}`, 0, { EX: expire });
@@ -154,8 +153,8 @@ class RedisMap {
 
         const pipeline = this.#redis.multi();
 
-        pipeline.set(this.name, msgpack.encode(JSON.stringify(this.data)));
-        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.DELETE, key })));
+        pipeline.set(this.name, JSON.stringify(this.data));
+        pipeline.publish(this.name, JSON.stringify({ a: Action.DELETE, key }));
 
         await pipeline.exec();
     }
@@ -167,7 +166,7 @@ class RedisMap {
         const pipeline = this.#redis.multi();
 
         pipeline.del(this.name);
-        pipeline.publish(this.name, msgpack.encode(JSON.stringify({ a: Action.CLEAR })));
+        pipeline.publish(this.name, JSON.stringify({ a: Action.CLEAR }));
 
         await pipeline.exec();
     }
@@ -176,8 +175,10 @@ class RedisMap {
         const data = await this.#redis.get(this.name).catch(() => null);
 
         if (data) {
-            this.data = JSON.parse(msgpack.decode(data));
+            this.data = simdjson.lazyParse(data);
             this.#log("info", `[${this.name}] Redis data synced!`);
+        } else {
+            this.#log("info", `[${this.name}] No data found on redis to sync!`);
         }
     }
 
@@ -194,7 +195,8 @@ class RedisMap {
         });
 
         this.#pubsub.subscribe(this.name, (message) => {
-            const { a: action, key, value } = JSON.parse(msgpack.decode(message));
+            const { a: action, key, value } = simdjson.lazyParse(message);
+
             this.#log("info", { action, key, value });
 
             switch (action) {
@@ -208,7 +210,6 @@ class RedisMap {
                     this.data = {};
                     break;
             }
-
         });
     }
 

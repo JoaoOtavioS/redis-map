@@ -4,8 +4,8 @@
   "description": "A simple way to use something similar to the Map in javascript, but synchronized with the power of Redis.",
   "main": "src/index.js",
   "dependencies": {
-    "msgpack-lite": "^0.1.26",
-    "redis": "^4.6.10"
+    "redis": "^4.6.10",
+    "simdjson": "latest"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

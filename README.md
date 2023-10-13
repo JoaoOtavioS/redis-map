@@ -13,7 +13,8 @@ const { RedisAPI, RedisMap } = require("@joaootavios/redis-map");
 (async () => {
     
     const connections = await new RedisAPI({
-        url: process.env.REDIS, monitor: (type, message) => {
+        url: process.env.REDIS, 
+        monitor: (type, message) => {
             console.log(`[REDIS] ${type}: ${message}`);
         }
     }).connect();
@@ -23,7 +24,8 @@ const { RedisAPI, RedisMap } = require("@joaootavios/redis-map");
     // first map;
     const cacheUsers = new RedisMap({
         connections,
-        name: "example:cache:users", monitor: (type, message, name) => {
+        name: "example:cache:users", 
+        monitor: (type, message, name) => {
             console.log(name, type, message);
         }
     });
@@ -31,9 +33,8 @@ const { RedisAPI, RedisMap } = require("@joaootavios/redis-map");
     // second map;
     const cacheApps = new RedisMap({
         connections,
-        name: "example:cache:apps", monitor: (type, message, name) => {
-            console.log(name, type, message);
-        }
+        name: "example:cache:apps",
+        sync: false // disable sync with redis;
     });
 
     await cacheUsers.set("joao", { plan: "free", balance: 1000 });
